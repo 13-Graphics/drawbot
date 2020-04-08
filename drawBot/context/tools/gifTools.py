@@ -1,5 +1,3 @@
-from __future__ import division, absolute_import, print_function
-
 import AppKit
 import shutil
 import os
@@ -62,7 +60,7 @@ def _explodeGif(path):
     files = os.listdir(destRoot)
     _explodedGifCache[path] = dict(
         source=destRoot,
-        fileNames=files,
+        fileNames=sorted(files),
     )
 
 

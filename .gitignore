@@ -15,8 +15,7 @@ var
 sdist
 develop-eggs
 .installed.cfg
-lib
-lib64
+
 
 # Installer logs
 pip-log.txt
@@ -50,3 +49,4 @@ env/*
 # DrawBot tests
 tests/temp_data/*  # obsolete
 tests/tempTestData/*
+

@@ -1,20 +1,12 @@
-from __future__ import absolute_import
-
-import platform
-from distutils.version import StrictVersion
 import AppKit
 import CoreText
 import Quartz
 
 from .tools import gifTools
 
-from .baseContext import BaseContext
-from drawBot.misc import DrawBotError, isPDF, isGIF
-
-
-osVersionCurrent = StrictVersion(platform.mac_ver()[0])
-osVersion10_11 = StrictVersion("10.11")
-osVersion10_13 = StrictVersion("10.13")
+from .baseContext import BaseContext, FormattedString
+from ..misc import DrawBotError, isPDF, isGIF
+from ..macOSVersion import macOSVersion
 
 
 def sendPDFtoPrinter(pdfDocument):
@@ -41,9 +33,9 @@ class PDFContext(BaseContext):
         self.size(width, height)
         mediaBox = Quartz.CGRectMake(0, 0, self.width, self.height)
 
+        # reset the context
+        self.reset()
         if self._hasContext:
-            # reset the context
-            self.reset()
             # add a new page
             Quartz.CGContextEndPage(self._pdfContext)
             Quartz.CGContextBeginPage(self._pdfContext, mediaBox)
@@ -147,7 +139,7 @@ class PDFContext(BaseContext):
     def _textBox(self, txt, box, align):
         path, (x, y) = self._getPathForFrameSetter(box)
 
-        canDoGradients = True
+        canDoGradients = not isinstance(txt, FormattedString)
         attrString = self.attributedString(txt, align=align)
         if self._state.hyphenation:
             attrString = self.hyphenateAttributedString(attrString, path)
@@ -209,7 +201,7 @@ class PDFContext(BaseContext):
                         Quartz.CGContextSetLineJoin(self._pdfContext, self._state.lineJoin)
                 if fillColor is not None and strokeColor is not None:
                     drawingMode = Quartz.kCGTextFillStroke
-                    if osVersionCurrent >= osVersion10_11 and osVersion10_11 < osVersion10_13:
+                    if macOSVersion >= "10.11" and macOSVersion < "10.13":
                         # solve bug in OSX where the stroke color is the same as the fill color
                         # simple solution: draw it twice...
                         drawingMode = Quartz.kCGTextFill

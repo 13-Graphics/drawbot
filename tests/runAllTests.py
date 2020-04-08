@@ -1,11 +1,12 @@
-from __future__ import print_function, division, absolute_import
-import sys
-import os
-import unittest
 import doctest
-import importlib
 import glob
+import importlib
+import os
+import sys
+import unittest
 
+
+inDrawBotApp = "drawBot.ui.codeEditor" in sys.modules
 
 testRootDir = os.path.dirname(os.path.abspath(__file__))
 if testRootDir not in sys.path:
@@ -24,5 +25,6 @@ for moduleName in modulesWithDocTests:
     m = importlib.import_module(moduleName)
     suite.addTest(doctest.DocTestSuite(m))
 
-unittest.TextTestRunner(verbosity=1).run(suite)
-# TODO: call sys.exit() with result code if we're not in DB
+result = unittest.TextTestRunner(verbosity=1).run(suite)
+if not inDrawBotApp and not result.wasSuccessful():
+    sys.exit(1)

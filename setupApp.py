@@ -1,19 +1,20 @@
-from __future__ import print_function
-
 import py2app
 from distutils.core import setup
 from distutils.sysconfig import get_python_lib
+import pkg_resources
 import os
 import sys
 import subprocess
 import shutil
+import tempfile
+import time
 import datetime
 import re
-from plistlib import readPlist, writePlist
+import plistlib
 
-from fontTools.misc.py23 import PY3
+from drawBot.drawBotSettings import __version__
 
-from drawBot.drawBotSettings import __version__, appName
+appName = "DrawBot"
 
 rawTimeStamp = datetime.datetime.today()
 timeStamp = rawTimeStamp.strftime("%y%m%d%H%M")
@@ -63,10 +64,7 @@ def getStdLibModules():
     stdLibPath = get_python_lib(standard_lib=True)
     isSystemPython = stdLibPath.startswith("/System/")
     extensions = {"py"}
-    if PY3:
-        extensions.add("cpython-%s%sm-darwin.so" % (sys.version_info.major, sys.version_info.minor))
-    else:
-        extensions.add("so")
+    extensions.add("cpython-%s%sm-darwin.so" % (sys.version_info.major, sys.version_info.minor))
     skip = {"site-packages", "test", "turtledemo", "tkinter", "idlelib", "lib2to3"}
     return list(_findModules(stdLibPath, extensions, skip)), isSystemPython
 
@@ -105,12 +103,15 @@ ftpPassword = getValueFromSysArgv("--ftppassword")
 buildDMG = getValueFromSysArgv("--dmg", isBooleanFlag=True)
 runTests = getValueFromSysArgv("--runTests", isBooleanFlag=True)
 
+notarizeDeveloper = getValueFromSysArgv("--notarizedeveloper")
+notarizePassword = getValueFromSysArgv("--notarizePassword")
+
+
 osxMinVersion = "10.9.0"
 
-if PY3:
-    iconFile = "DrawBotPy3.icns"
-else:
-    iconFile = "DrawBot.icns"
+iconFile = "DrawBot.icns"
+
+bundleIdentifier = "com.drawbot"
 
 plist = dict(
 
@@ -122,8 +123,16 @@ plist = dict(
             CFBundleTypeIconFile="pythonIcon.icns",
             NSDocumentClass="DrawBotDocument",
         ),
+        dict(
+            CFBundleTypeExtensions=["drawbot"],
+            CFBundleTypeName="DrawBot Package",
+            CFBundleTypeRole="Viewer",
+            CFBundleTypeIconFile="drawbotPackageIcon.icns",
+            NSDocumentClass="DrawBotDocument",
+            LSTypeIsPackage=True,
+        ),
     ],
-    CFBundleIdentifier="com.drawbot",
+    CFBundleIdentifier=bundleIdentifier,
     LSMinimumSystemVersion=osxMinVersion,
     LSApplicationCategoryType="public.app-category.graphics-design",
     LSMinimumSystemVersionByArchitecture=dict(i386=osxMinVersion, x86_64=osxMinVersion),
@@ -137,6 +146,7 @@ plist = dict(
             CFBundleURLName="com.drawbot",
             CFBundleURLSchemes=[appName.lower()])
     ],
+    NSRequiresAquaSystemAppearance=False,
 )
 
 
@@ -180,14 +190,18 @@ setup(
                 'pygments',
                 'jedi',
                 'fontTools',
+                'fs',
                 # 'xml'
                 'pkg_resources',
+                'parso',
+                'pip',
             ],
             includes=[
                 # 'csv',
                 # 'this'
             ] + stdLibIncludes,
             excludes=[
+                "packaging",
                 "numpy",
                 "scipy",
                 "matplotlib",
@@ -203,27 +217,40 @@ setup(
 
 # fix the icon
 path = os.path.join(os.path.dirname(__file__), "dist", "%s.app" % appName, "Contents", "Info.plist")
-appPlist = readPlist(path)
+with open(path, "rb") as f:
+    appPlist = plistlib.load(f)
 appPlist["CFBundleIconFile"] = iconFile
-writePlist(appPlist, path)
+with open(path, "wb") as f:
+    plistlib.dump(appPlist, f)
 
 
 # get relevant paths
 drawBotRoot = os.path.dirname(os.path.abspath(__file__))
 distLocation = os.path.join(drawBotRoot, "dist")
 appLocation = os.path.join(distLocation, "%s.app" % appName)
+resourcesPath = os.path.join(appLocation, "Contents", "Resources")
 imgLocation = os.path.join(distLocation, "img_%s" % appName)
 existingDmgLocation = os.path.join(distLocation, "%s.dmg" % appName)
 dmgLocation = os.path.join(distLocation, appName)
+pythonVersion = "python%s.%i" % (sys.version_info[0], sys.version_info[1])
+pythonLibPath = os.path.join(resourcesPath, "lib", pythonVersion)
+appToolsRoot = os.path.join(drawBotRoot, "app")
 
 
 if "-A" not in sys.argv:
     # make sure the external tools have the correct permissions
     externalTools = ("ffmpeg", "gifsicle", "mkbitmap", "potrace")
     for externalTool in externalTools:
-        externalToolPath = os.path.join(appLocation, "contents", "Resources", externalTool)
+        externalToolPath = os.path.join(resourcesPath, externalTool)
         os.chmod(externalToolPath, 0o775)
 
+    # See:
+    # https://bitbucket.org/ronaldoussoren/py2app/issues/256/fs-module-not-fully-working-from-app
+    # https://github.com/PyFilesystem/pyfilesystem2/issues/228
+    for pkgName in ["fs", "appdirs", "pytz", "six", "setuptools"]:
+        infoPath = pkg_resources.get_distribution(pkgName).egg_info
+        baseInfoName = os.path.basename(infoPath)
+        shutil.copytree(infoPath, os.path.join(pythonLibPath, baseInfoName))
 
 if runTests:
     appExecutable = os.path.join(appLocation, "Contents", "MacOS", appName)
@@ -258,29 +285,10 @@ if buildDMG or ftpHost is not None:
 
     if codeSignDeveloperName:
         # ================
-        # = code singing =
+        # = code signing =
         # ================
-        print("---------------------")
-        print("-   code signing    -")
-        cmds = ["codesign", "--force", "--deep", "--sign", "Developer ID Application: %s" % codeSignDeveloperName, appLocation]
-        popen = subprocess.Popen(cmds)
+        popen = subprocess.Popen([os.path.join(appToolsRoot, "codesign-app.sh"), "Developer ID Application: %s" % codeSignDeveloperName, appLocation, os.path.join(appToolsRoot, "entitlements.xml")])
         popen.wait()
-        print("- done code singing -")
-        print("---------------------")
-
-        print("------------------------------")
-        print("- verifying with codesign... -")
-        cmds = ["codesign", "--verify", "--verbose=4", appLocation]
-        popen = subprocess.Popen(cmds)
-        popen.wait()
-        print("------------------------------")
-
-        print("---------------------------")
-        print("- verifying with spctl... -")
-        cmds = ["spctl", "--verbose=4", "--raw", "--assess", "--type", "execute", appLocation]
-        popen = subprocess.Popen(cmds)
-        popen.wait()
-        print("---------------------------")
 
     # ================
     # = creating dmg =
@@ -294,7 +302,10 @@ if buildDMG or ftpHost is not None:
     os.rename(os.path.join(distLocation, "%s.app" % appName), os.path.join(imgLocation, "%s.app" % appName))
     tempDmgName = "%s.tmp.dmg" % appName
 
-    os.system("hdiutil create -size 200m -srcfolder \"%s\" -volname %s -format UDZO \"%s\"" % (imgLocation, appName, os.path.join(distLocation, tempDmgName)))
+    # add a link to the Applications
+    os.system("ln -s /Applications %s" % imgLocation)
+
+    os.system("hdiutil create -fs HFS+ -size 200m -srcfolder \"%s\" -volname %s -format UDZO \"%s\"" % (imgLocation, appName, os.path.join(distLocation, tempDmgName)))
 
     os.system("hdiutil convert -format UDZO -imagekey zlib-level=9 -o \"%s\" \"%s\"" % (dmgLocation, os.path.join(distLocation, tempDmgName)))
 
@@ -306,6 +317,96 @@ if buildDMG or ftpHost is not None:
 
     print("- done building dmg... -")
     print("------------------------")
+
+    if notarizeDeveloper and notarizePassword:
+        print("----------------------")
+        print("-    notarizing dmg   -")
+        notarize = [
+            "xcrun",
+            "altool",
+            "--notarize-app",
+            "-t",
+            "osx",
+            "--file",
+            existingDmgLocation,
+            "--primary-bundle-id", bundleIdentifier,
+            "-u", notarizeDeveloper,
+            "-p", notarizePassword,
+            "--output-format", "xml"
+        ]
+
+        notarizeStapler = [
+            "xcrun",
+            "stapler",
+            "staple", existingDmgLocation
+        ]
+
+        print("notarizing app")
+        notarisationRequestUUID = None
+        with tempfile.TemporaryFile(mode='w+b') as stdoutFile:
+            popen = subprocess.Popen(notarize, stdout=stdoutFile)
+            popen.wait()
+            stdoutFile.seek(0)
+            data = stdoutFile.read()
+            data = plistlib.loads(data)
+            if "notarization-upload" in data:
+                notarisationRequestUUID = data["notarization-upload"].get("RequestUUID")
+                print("notarisation Request UUID:", notarisationRequestUUID)
+
+            if "product-errors" in data:
+                print("\n".join([e["message"] for e in data["product-errors"]]))
+        print("done notarizing app")
+
+        notarisationSucces = False
+        if notarisationRequestUUID:
+            print("getting notarization info")
+            notarizeInfo = [
+                "xcrun",
+                "altool",
+                "--notarization-info", notarisationRequestUUID,
+                "-u", notarizeDeveloper,
+                "-p", notarizePassword,
+                "--output-format", "xml"
+                ]
+            countDown = 16
+            while countDown:
+                with tempfile.TemporaryFile(mode='w+b') as stdoutFile:
+                    popen = subprocess.Popen(notarizeInfo, stdout=stdoutFile)
+                    popen.wait()
+                    stdoutFile.seek(0)
+                    data = stdoutFile.read()
+                    data = plistlib.loads(data)
+
+                    if "notarization-info" in data:
+                        status = data["notarization-info"].get("Status", "").lower()
+                        print("     notarization status:", status)
+                        if status == "success":
+                            notarisationSucces = True
+                            print("notarization succes")
+                            break
+                        if status == "invalid":
+                            print("notarization invalid")
+                            break
+                    print("     Not completed yet. Sleeping for 30 seconds")
+                countDown -= 1
+                time.sleep(30)
+
+            if "notarization-info" in data:
+                print("get notarization log")
+                logURL = data["notarization-info"].get("LogFileURL")
+                if logURL:
+                    os.system(f"curl -s {logURL} > {os.path.join(distLocation, 'notarize_log.txt')}")
+
+            print("done getting notarization info")
+
+        if notarisationSucces:
+            print("stapler")
+            popen = subprocess.Popen(notarizeStapler)
+            popen.wait()
+            print("done stapler")
+
+        print("- done notarizing dmg -")
+        print("----------------------")
 
     if ftpHost and ftpPath and ftpLogin and ftpPassword:
         import ftplib

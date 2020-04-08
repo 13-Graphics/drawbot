@@ -1,62 +1,61 @@
-from __future__ import absolute_import, print_function
-
-try:
-    from urllib2 import urlopen
-except ImportError:
-    from urllib.request import urlopen
+from urllib.request import urlopen
+import ssl
 import subprocess
 import plistlib
 import AppKit
 import re
+import traceback
 
 from distutils.version import StrictVersion
 
 import vanilla
+from vanilla.dialogs import message
 from defconAppKit.windows.progressWindow import ProgressWindow
 
 from drawBot import __version__
 from .misc import DrawBotError, getDefault
 
-from fontTools.misc.py23 import unichr, PY2
-
 
 _versionRE = re.compile(r'__version__\s*=\s*\"([^\"]+)\"')
+
+__fallback_version__ = "0.0"
 
 
 def getCurrentVersion():
     """
-    Return the newest version number from github.
+    Return tuple (succesfully retreived, newest version number) from github.
     """
-    __fallback_version__ = "0.0"
+    errors = []
     if not getDefault("checkForUpdatesAtStartup", True):
-        return __fallback_version__
+        return __fallback_version__, errors
     path = "https://raw.github.com/typemytype/drawbot/master/drawBot/drawBotSettings.py"
     code = None
     try:
-        response = urlopen(path, timeout=5)
+        context = ssl._create_unverified_context()
+        response = urlopen(path, timeout=5, context=context)
         code = response.read()
         # convert to ascii and stri
         # in py3 this are bytes and a string object is needed
         code = str(code.decode("ascii"))
         response.close()
-    except Exception:
+    except Exception as e:
         # just silently fail, its not so important
+        errors.append(f"Cannot retrieve version number from DrawBot repo:\n{e}")
         pass
     if code:
         found = _versionRE.search(code)
         if found:
-            return found.group(1)
-    return __fallback_version__
+            return found.group(1), errors
+        else:
+            errors.append(f"Cannot retrieve version number from the following code:\n{code}")
+    return __fallback_version__, errors
 
 
 def downloadCurrentVersion():
     """
     Download the current version (dmg) and mount it
     """
-    if PY2:
-        path = "http://static.typemytype.com/drawBot/DrawBotPy2.dmg"
-    else:
-        path = "http://static.typemytype.com/drawBot/DrawBot.dmg"
+    path = "https://github.com/typemytype/drawbot/releases/latest/download/DrawBot.dmg"
     try:
         # download and mount
         cmds = ["hdiutil", "attach", "-plist", path]
@@ -64,15 +63,16 @@ def downloadCurrentVersion():
         out, err = popen.communicate()
         if popen.returncode != 0:
             raise DrawBotError("Mounting failed")
-        output = plistlib.readPlistFromString(out)
+        output = plistlib.loads(out)
         dmgPath = None
         for item in output["system-entities"]:
             if "mount-point" in item:
                 dmgPath = item["mount-point"]
                 break
         AppKit.NSWorkspace.sharedWorkspace().openFile_(dmgPath)
-    except:
-        print("Something went wrong while downloading %s" % path)
+    except Exception:
+        exc = traceback.format_exc()
+        message("Something went wrong while downloading %s" % path, exc)
 
 
 class Updater(object):
@@ -84,8 +84,11 @@ class Updater(object):
         self.__version__ = __version__
         if not getDefault("DrawBotCheckForUpdatesAtStartup", True):
             return
-        self.currentVersion = getCurrentVersion()
+        self.currentVersion, self.currentVersionErrors = getCurrentVersion()
         self.needsUpdate = StrictVersion(__version__) < StrictVersion(self.currentVersion)
+        if self.currentVersionErrors:
+            # print them out so the debugger window catch this
+            print("\n".join(self.currentVersionErrors))
         if not self.needsUpdate:
             return
         if parentWindow:
@@ -104,7 +107,7 @@ class Updater(object):
 
         self.w.cancelButton = vanilla.Button((-270, -30, 60, 20), "Cancel", callback=self.cancelCallback, sizeStyle="small")
         self.w.cancelButton.bind(".", ["command"])
-        self.w.cancelButton.bind(unichr(27), [])
+        self.w.cancelButton.bind(chr(27), [])
 
         self.w.openInBrowser = vanilla.Button((-200, -30, 120, 20), "Show In Browser", callback=self.openInBrowserCallback, sizeStyle="small")
         self.w.okButton = vanilla.Button((-70, -30, 55, 20), "OK", callback=self.okCallback, sizeStyle="small")

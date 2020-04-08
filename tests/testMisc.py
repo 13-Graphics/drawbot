@@ -1,15 +1,16 @@
-from __future__ import print_function, division, absolute_import
-
-from fontTools.misc.py23 import *
-from fontTools.misc.py23 import PY3
 import sys
 import os
 import unittest
 import io
+from collections import OrderedDict
 import drawBot
 from drawBot.misc import DrawBotError, warnings
 from drawBot.scriptTools import ScriptRunner
 from testSupport import StdOutCollector, testDataDir
+
+
+def _roundDictValues(d, digits):
+    return {k: round(v, digits) if isinstance(v, float) else v for k, v in d.items()}
 
 
 class MiscTest(unittest.TestCase):
@@ -17,17 +18,17 @@ class MiscTest(unittest.TestCase):
     def test_openTypeFeatures(self):
         drawBot.newDrawing()
         fea = drawBot.listOpenTypeFeatures()
-        self.assertEqual(fea, {'liga': True})
+        self.assertEqual(fea, ['liga'])
         drawBot.font("Helvetica")
         fea = drawBot.listOpenTypeFeatures()
-        self.assertEqual(fea, {'liga': True, 'tnum': True, 'pnum': False})
+        self.assertEqual(fea, ['liga', 'pnum', 'tnum'])
         fea = drawBot.listOpenTypeFeatures("HoeflerText-Regular")
-        self.assertEqual(fea, {'liga': True, 'dlig': False, 'tnum': True, 'pnum': False, 'titl': True, 'onum': True, 'lnum': False})
+        self.assertEqual(fea, ['dlig', 'liga', 'lnum', 'onum', 'pnum', 'titl', 'tnum'])
         fea = drawBot.openTypeFeatures(liga=False)
-        self.assertEqual(fea, {'liga': False, 'tnum': True, 'pnum': False})
+        self.assertEqual(fea, {'liga': False})
         drawBot.font("LucidaGrande")
         fea = drawBot.openTypeFeatures(resetFeatures=True)
-        self.assertEqual(fea, {'liga': True})
+        self.assertEqual(fea, {})
 
     def test_openTypeFeatures_saveRestore(self):
         drawBot.newDrawing()
@@ -42,7 +43,12 @@ class MiscTest(unittest.TestCase):
         drawBot.font("Skia")
         # get the default font variations
         var = drawBot.listFontVariations()
-        expectedVar = {'wght': {'name': 'Weight', 'minValue': 0.4799, 'maxValue': 3.1999, 'defaultValue': 1.0}, 'wdth': {'name': 'Width', 'minValue': 0.6199, 'maxValue': 1.2999, 'defaultValue': 1.0}}
+        var['wght'] = _roundDictValues(var['wght'], 3)
+        var['wdth'] = _roundDictValues(var['wdth'], 3)
+        expectedVar = OrderedDict({
+            'wght': {'name': 'Weight', 'minValue': 0.48, 'maxValue': 3.2, 'defaultValue': 1.0},
+            'wdth': {'name': 'Width', 'minValue': 0.62, 'maxValue': 1.3, 'defaultValue': 1.0},
+        })
         self.assertEqual(var, expectedVar)
         # set a font variation
         var = drawBot.fontVariations(wght=5)
@@ -56,6 +62,21 @@ class MiscTest(unittest.TestCase):
         self.assertEqual(var, {})
         var = drawBot.fontVariations(wght=5)
         self.assertEqual(var, {"wght": 5})
+
+    def test_fontVariationNamedInstances(self):
+        drawBot.newDrawing()
+        namedInstances = drawBot.listNamedInstances()
+        self.assertEqual(namedInstances, {})
+        drawBot.font("Skia")
+        namedInstances = drawBot.listNamedInstances()
+        namedInstances = _roundInstanceLocations(namedInstances)
+        expectedNamedInstances = {'Skia-Regular_Black': {'wght': 3.2, 'wdth': 1.0}, 'Skia-Regular_Extended': {'wght': 1.0, 'wdth': 1.3}, 'Skia-Regular_Condensed': {'wght': 1.0, 'wdth': 0.61998}, 'Skia-Regular_Light': {'wght': 0.48, 'wdth': 1.0}, 'Skia-Regular': {'wght': 1.0, 'wdth': 1.0}, 'Skia-Regular_Black-Extended': {'wght': 3.2, 'wdth': 1.3}, 'Skia-Regular_Light-Extended': {'wght': 0.48, 'wdth': 1.3}, 'Skia-Regular_Black-Condensed': {'wght': 3.0, 'wdth': 0.7}, 'Skia-Regular_Light-Condensed': {'wght': 0.48, 'wdth': 0.7}, 'Skia-Regular_Bold': {'wght': 1.95, 'wdth': 1.0}}
+        expectedNamedInstances = _roundInstanceLocations(expectedNamedInstances)
+        self.assertEqual(namedInstances, expectedNamedInstances)
+        drawBot.font("Helvetica")
+        namedInstances = drawBot.listNamedInstances("Skia")
+        namedInstances = _roundInstanceLocations(namedInstances)
+        self.assertEqual(namedInstances, expectedNamedInstances)
 
     def test_polygon_notEnoughPoints(self):
         drawBot.newDrawing()
@@ -74,40 +95,38 @@ class MiscTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             drawBot.polygon((1, 2), (3, 4), closed=False, foo=123)
 
+    def test_image_imageResolution(self):
+        path = os.path.join(testDataDir, "drawbot.png")
+        dpi = drawBot.imageResolution(path)
+        self.assertEqual(dpi, 72)
+
+        path = os.path.join(testDataDir, "drawbot144.png")
+        dpi = drawBot.imageResolution(path)
+        self.assertEqual(dpi, 144)
+
     def test_ScriptRunner_StdOutCollector(self):
         out = StdOutCollector()
         ScriptRunner("print('hey!')", stdout=out, stderr=out)
         self.assertEqual(out.lines(), ["hey!"])
 
     def test_ScriptRunner_io(self):
-        if PY3:
-            MyStringIO = io.StringIO
-        else:
-            class MyStringIO(io.StringIO):
-                def write(self, value):
-                    if not isinstance(value, unicode):
-                        value = value.decode("utf8")
-                    super(MyStringIO, self).write(value)
-        out = MyStringIO()
+        out = io.StringIO()
         ScriptRunner("print('hey!')", stdout=out, stderr=out)
         self.assertEqual(out.getvalue(), u'hey!\n')
-        out = MyStringIO()
+        out = io.StringIO()
         ScriptRunner("print(u'hey!')", stdout=out, stderr=out)
         self.assertEqual(out.getvalue(), u'hey!\n')
-        out = MyStringIO()
+        out = io.StringIO()
         ScriptRunner(u"print('hey!')", stdout=out, stderr=out)
         self.assertEqual(out.getvalue(), u'hey!\n')
-        out = MyStringIO()
+        out = io.StringIO()
         ScriptRunner(u"print(u'hey!')", stdout=out, stderr=out)
         self.assertEqual(out.getvalue(), u'hey!\n')
 
     def test_ScriptRunner_print_function(self):
         out = StdOutCollector()
         ScriptRunner("print 'hey!'", stdout=out, stderr=out)
-        if PY3:
-            self.assertEqual(out.lines()[-1], "SyntaxError: Missing parentheses in call to 'print'. Did you mean print('hey!')?")
-        else:
-            self.assertEqual(out.lines(), ["hey!"])
+        self.assertEqual(out.lines()[-1], "SyntaxError: Missing parentheses in call to 'print'. Did you mean print('hey!')?")
 
     def test_ScriptRunner_division(self):
         out = StdOutCollector()
@@ -122,10 +141,7 @@ class MiscTest(unittest.TestCase):
         try:
             out = StdOutCollector()
             ScriptRunner("print(1/2)", stdout=out, stderr=out)
-            if PY3:
-                self.assertEqual(out.lines(), ["0.5"])
-            else:
-                self.assertEqual(out.lines(), ["0"])
+            self.assertEqual(out.lines(), ["0.5"])
         finally:
             drawBot.scriptTools.getDefault = realGetDefault
 
@@ -167,6 +183,86 @@ class MiscTest(unittest.TestCase):
         out = StdOutCollector()
         ScriptRunner("aaa bbb", stdout=out, stderr=out, checkSyntaxOnly=True)
         self.assertEqual(out.lines()[-1], 'SyntaxError: invalid syntax')
+
+    def test_newPage_empty_single(self):
+        drawBot.newDrawing()
+        drawBot.newPage()
+        self.assertEqual(drawBot.width(), 1000)
+        self.assertEqual(drawBot.height(), 1000)
+        self.assertEqual(drawBot.pageCount(), 1)
+
+    def test_newPage_empty_implicit_first_page(self):
+        drawBot.newDrawing()
+        drawBot.rect(100, 100, 200, 200)
+        drawBot.newPage()
+        self.assertEqual(drawBot.width(), 1000)
+        self.assertEqual(drawBot.height(), 1000)
+        self.assertEqual(drawBot.pageCount(), 2)
+
+    def test_newPage_empty_multiple(self):
+        drawBot.newDrawing()
+        drawBot.newPage()
+        drawBot.newPage()
+        drawBot.newPage()
+        self.assertEqual(drawBot.width(), 1000)
+        self.assertEqual(drawBot.height(), 1000)
+        self.assertEqual(drawBot.pageCount(), 3)
+
+    def test_newPage_following(self):
+        drawBot.newDrawing()
+        drawBot.size(400, 500)
+        drawBot.newPage()
+        self.assertEqual(drawBot.width(), 400)
+        self.assertEqual(drawBot.height(), 500)
+        self.assertEqual(drawBot.pageCount(), 2)
+
+    def test_font_install(self):
+        fontPath = os.path.join(testDataDir, "MutatorSans.ttf")
+        drawBot.newDrawing()
+        drawBot.newPage()
+        postscriptName = drawBot.font(fontPath)
+        self.assertEqual(postscriptName, "MutatorMathTest-LightCondensed")
+        variations = drawBot.listFontVariations()
+        self.assertEqual(variations, {'wdth': {'name': 'Width', 'minValue': 0.0, 'maxValue': 1000.0, 'defaultValue': 0.0}, 'wght': {'name': 'Weight', 'minValue': 0.0, 'maxValue': 1000.0, 'defaultValue': 0.0}})
+
+    def test_formattedString_issue337(self):
+        # https://github.com/typemytype/drawbot/issues/337
+        drawBot.newDrawing()
+        fs = drawBot.FormattedString("A\n")
+        drawBot.text(fs, (0, 0))
+
+    def test_formattedString_issue337_part2(self):
+        # https://github.com/typemytype/drawbot/issues/337
+        drawBot.newDrawing()
+        fs = drawBot.FormattedString("A\n\n")
+        drawBot.text(fs, (0, 0))
+
+    def test_formattedString_issue337_part3(self):
+        # Verifying we get the correct line height on an empty string
+        expected = [
+            'reset None',
+            'newPage 1000 1000',
+            'textBox A 0 -34.0 26.8994140625 104.0 left',
+            'textBox B 0 -48.0 25.751953125 104.0 left',
+            'textBox C 0 -62.0 26.9189453125 104.0 left',
+            'textBox A 10 -34.0 26.8994140625 104.0 left',
+            'textBox C 10 -62.0 26.9189453125 104.0 left',
+            "saveImage * {}",
+        ]
+        with StdOutCollector() as output:
+            import drawBot
+            drawBot.newDrawing()
+            fs = drawBot.FormattedString("A\nB\nC\n")
+            drawBot.text(fs, (0, 60))
+            fs = drawBot.FormattedString("A\n\nC\n")
+            drawBot.text(fs, (10, 60))
+            drawBot.saveImage("*")
+            drawBot.endDrawing()
+        self.assertEqual(output.lines(), expected)
+
+
+def _roundInstanceLocations(instanceLocations):
+    return {instanceName: {tag: round(value, 3) for tag, value in location.items()} for instanceName, location in instanceLocations.items()}
 
 
 if __name__ == '__main__':

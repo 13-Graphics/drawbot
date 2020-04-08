@@ -22,13 +22,19 @@ import time
 
 class MetaMock(type):
 
+    __slots__ = []
+
     def __getattr__(self, name):
         return self
 
+    def __len__(self):
+        return 0
 
-class Mock(object):
+    def __iter__(self):
+        return iter([])
 
-    __metaclass__ = MetaMock
+
+class Mock(object, metaclass=MetaMock):
 
     def __init__(self, *args, **kwargs):
         pass
@@ -47,10 +53,14 @@ class Mock(object):
 MOCK_MODULES = ['py2app',
         'AppKit', 'Quartz', 'CoreText', 'QTKit',
         'fontTools',
+        'fontTools.ttLib',
+        'fontTools.ttLib.ttCollection',
         'fontTools.misc',
         'fontTools.misc.transform',
         'fontTools.misc.xmlWriter',
         'fontTools.misc.py23',
+        'fontTools.misc.macCreatorType',
+        'fontTools.misc.macRes',
         'fontTools.pens',
         'fontTools.pens.basePen',
         'fontTools.pens.areaPen',
@@ -63,6 +73,7 @@ MOCK_MODULES = ['py2app',
 for mod_name in MOCK_MODULES:
     sys.modules[mod_name] = Mock()
 
+print(sys.version_info)
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -71,6 +82,8 @@ sys.path.insert(0, os.path.abspath('../'))
 
 
 import drawBot.drawBotSettings as drawBotSettings
+
+appName = "DrawBot"
 
 # -- General configuration -----------------------------------------------------
 
@@ -94,7 +107,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = drawBotSettings.appName
+project = appName
 copyright = u'%s, Just van Rossum, Erik van Blokland, Frederik Berlaen' % (time.strftime('%Y'))
 
 # The version info for the project you're documenting, acts as replacement for
@@ -158,10 +171,10 @@ html_theme_path = ['_themes']
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
-html_title = "%s %s" % (drawBotSettings.appName, release)
+html_title = "%s %s" % (appName, release)
 
 # A shorter title for the navigation bar.  Default is the same as html_title.
-html_short_title = drawBotSettings.appName
+html_short_title = appName
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
@@ -314,6 +327,19 @@ from sphinx.directives.code import LiteralInclude, CodeBlock
 from sphinx.util.inspect import getargspec
 from sphinx.ext import autodoc
 from sphinx.writers.html import HTMLTranslator
+from sphinx.util import DownloadFiles
+
+
+def add_file_overwrite(self, docname, filename):
+    # type: (str, str) -> None
+    if filename not in self:
+        dest = os.path.basename(filename)
+        self[filename] = (set(), dest)
+
+    self[filename][0].add(docname)
+    return self[filename][1]
+
+DownloadFiles.add_file = add_file_overwrite
 
 downloadCodeRoot = os.path.join(os.path.dirname(__file__), "downloads")
 if os.path.exists(downloadCodeRoot):
@@ -372,7 +398,7 @@ class DownloadCode(CodeBlock):
         # set it as filename
         self.options['filename'] = fileName
         # encode the whole content
-        self.content = [unicode(line) for line in self.content]
+        self.content = [line for line in self.content]
         # call parent class
         nodes = super(DownloadCode, self).run()
         # get the content and encode
@@ -386,7 +412,7 @@ class DownloadCode(CodeBlock):
         self.options["filename"] = fileName
         # write to disk
         f = open(path, "w")
-        f.write(code.encode("utf-8"))
+        f.write(code)
         f.close()
         # add example image if present
         imageBaseName, _ = os.path.splitext(fileName)

@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import AppKit
 from vanilla import *
 from defconAppKit.windows.baseWindow import BaseWindowController
@@ -73,7 +71,6 @@ class DrawBotController(BaseWindowController):
         if getDefault("DrawBotAddToolbar", True):
             # add toolbar
             self.addToolbar()
-
 
     def codeViewCallback(self, sender):
         document = self.w.getNSWindowController().document()
@@ -276,30 +273,35 @@ class DrawBotController(BaseWindowController):
                 itemIdentifier="run",
                 label="Run",
                 imageNamed="toolbarRun",
+                imageTemplate=True,
                 callback=self.toolbarRun,
             ),
             dict(
                 itemIdentifier="comment",
                 label="Comment",
                 imageNamed="toolbarComment",
+                imageTemplate=True,
                 callback=self.toolbarComment,
             ),
             dict(
                 itemIdentifier="uncomment",
                 label="Uncomment",
                 imageNamed="toolbarUncomment",
+                imageTemplate=True,
                 callback=self.toolbarUncomment,
             ),
             dict(
                 itemIdentifier="indent",
                 label="Indent",
                 imageNamed="toolbarIndent",
+                imageTemplate=True,
                 callback=self.toolbarIndent,
             ),
             dict(
                 itemIdentifier="dedent",
                 label="Dedent",
                 imageNamed="toolbarDedent",
+                imageTemplate=True,
                 callback=self.toolbarDedent,
             ),
         ]

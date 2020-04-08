@@ -1,8 +1,11 @@
-
-@import url("http://static.typemytype.com/drawBot/drawbotFonts.css");
+@import url("https://static.typemytype.com/drawBot/drawbotFonts.css");
 @import url("skeleton/base.css");
 @import url("skeleton/layout.css");
 @import url("skeleton/skeleton.css");
+
+* {
+ font-variant-ligatures: none!important;
+}
 
 html {
 	background-color: {{ theme_headercolor2 }};
@@ -119,6 +122,11 @@ ul ul, ul ol, ol ol, ol ul {
 	font-weight: bold;
 }
 
+.sphinxsidebarwrapper h3 a {
+	font-size: 14px;
+    line-height: 1.25;
+}
+
 /* auto doc classes */
 
 .function dt {
@@ -183,7 +191,7 @@ div.header a:hover {
 /* logo */
 
 .logo {
-	margin-left: 150px;
+	margin-left: 180px;
 	margin-right: auto;
 	margin-bottom: -40px;
 	width: 50%;

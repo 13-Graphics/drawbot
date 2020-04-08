@@ -1,4 +1,3 @@
-from __future__ import print_function
 from drawBot import *
 
 size(200, 200)
@@ -11,7 +10,12 @@ fontVariations(None)
 variations = listFontVariations()
 for axisTag in sorted(variations):
     data = variations[axisTag]
-    print(axisTag, [(k, str(data[k])) for k in sorted(data)])
+    # we're rounding the values so we don't trip over small differences between OSes
+    data['defaultValue'] = round(data['defaultValue'], 3)
+    data['minValue'] = round(data['minValue'], 3)
+    data['maxValue'] = round(data['maxValue'], 3)
+    data['name'] = str(data['name'])
+    print(axisTag, [(k, data[k]) for k in sorted(data)])
 
 text("Hello Q", (20, 170))
 fontVariations(wght=0.6)

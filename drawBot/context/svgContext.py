@@ -1,6 +1,3 @@
-from __future__ import absolute_import
-
-from fontTools.misc.py23 import round
 import AppKit
 import CoreText
 
@@ -12,7 +9,7 @@ from fontTools.misc.xmlWriter import XMLWriter
 from fontTools.misc.transform import Transform
 
 from .tools.openType import getFeatureTagsForFontAttributes
-from .baseContext import BaseContext, GraphicsState, Shadow, Color, Gradient
+from .baseContext import BaseContext, GraphicsState, Shadow, Color, Gradient, BezierPath, FormattedString
 from .imageContext import _makeBitmapImageRep
 
 from drawBot.misc import warnings, formatNumber
@@ -239,11 +236,11 @@ class SVGContext(BaseContext):
 
     _svgFileClass = SVGFile
 
-    _svgTagArguments = {
-        "version": "1.1",
-        "xmlns": "http://www.w3.org/2000/svg",
-        "xmlns:xlink": "http://www.w3.org/1999/xlink"
-    }
+    _svgTagArguments = [
+        ("version", "1.1"),
+        ("xmlns", "http://www.w3.org/2000/svg"),
+        ("xmlns:xlink", "http://www.w3.org/1999/xlink")
+    ]
 
     _svgLineJoinStylesMap = {
         AppKit.NSMiterLineJoinStyle: "miter",
@@ -319,7 +316,8 @@ class SVGContext(BaseContext):
         self._svgContext = XMLWriter(self._svgData, encoding="utf-8", indentwhite=self.indentation)
         self._svgContext.width = self.width
         self._svgContext.height = self.height
-        self._svgContext.begintag("svg", width=self.width, height=self.height, **self._svgTagArguments)
+        attrs = [('width', self.width), ('height', self.height), ('viewBox', f"0 0 {self.width} {self.height}")]
+        self._svgContext.begintag("svg", attrs + self._svgTagArguments)
         self._svgContext.newline()
         self._state.transformMatrix = self._state.transformMatrix.scale(1, -1).translate(0, -self.height)
 
@@ -352,13 +350,23 @@ class SVGContext(BaseContext):
             self._svgBeginClipPath()
             data = self._svgDrawingAttributes()
             data["d"] = self._svgPath(self._state.path)
+            if self._state.path.svgID:
+                data["id"] = self._state.path.svgID
+            if self._state.path.svgClass:
+                data["class"] = self._state.path.svgClass
             data["transform"] = self._svgTransform(self._state.transformMatrix)
             if self._state.shadow is not None:
                 data["filter"] = "url(#%s)" % self._state.shadow.tagID
             if self._state.gradient is not None:
                 data["fill"] = "url(#%s)" % self._state.gradient.tagID
+            if self._state.path.svgLink:
+                self._svgContext.begintag("a", **{"xlink:href": self._state.path.svgLink})
+                self._svgContext.newline()
             self._svgContext.simpletag("path", **data)
             self._svgContext.newline()
+            if self._state.path.svgLink:
+                self._svgContext.endtag("a")
+                self._svgContext.newline()
             self._svgEndClipPath()
 
     def _clipPath(self):
@@ -375,12 +383,12 @@ class SVGContext(BaseContext):
         self._svgContext.newline()
         self._state.clipPathID = uniqueID
 
-    def _textBox(self, txt, box, align):
+    def _textBox(self, rawTxt, box, align):
         path, (x, y) = self._getPathForFrameSetter(box)
         canDoGradients = True
         if align == "justified":
             warnings.warn("justified text is not supported in a svg context")
-        attrString = self.attributedString(txt, align=align)
+        attrString = self.attributedString(rawTxt, align=align)
         if self._state.hyphenation:
             attrString = self.hyphenateAttributedString(attrString, path)
         txt = attrString.string()
@@ -396,6 +404,14 @@ class SVGContext(BaseContext):
         }
         if self._state.shadow is not None:
             data["filter"] = "url(#%s_flipped)" % self._state.shadow.tagID
+        if isinstance(rawTxt, FormattedString):
+            if rawTxt.svgID:
+                data["id"] = rawTxt.svgID
+            if rawTxt.svgClass:
+                data["class"] = rawTxt.svgClass
+            if rawTxt.svgLink:
+                self._svgContext.begintag("a", **{"xlink:href": rawTxt.svgLink})
+                self._svgContext.newline()
         self._svgContext.begintag("text", **data)
         self._svgContext.newline()
 
@@ -411,7 +427,8 @@ class SVGContext(BaseContext):
                 stringRange = CoreText.CTRunGetStringRange(ctRun)
                 attributes = CoreText.CTRunGetAttributes(ctRun)
                 font = attributes.get(AppKit.NSFontAttributeName)
-                fontAttributes = font.fontDescriptor().fontAttributes()
+                fontDescriptor = font.fontDescriptor()
+                fontAttributes = fontDescriptor.fontAttributes()
                 fillColor = attributes.get(AppKit.NSForegroundColorAttributeName)
                 strokeColor = attributes.get(AppKit.NSStrokeColorAttributeName)
                 strokeWidth = attributes.get(AppKit.NSStrokeWidthAttributeName, self._state.strokeWidth)
@@ -420,6 +437,8 @@ class SVGContext(BaseContext):
 
                 fontName = font.fontName()
                 fontSize = font.pointSize()
+                fontFallbacks = [fallbackFont.postscriptName() for fallbackFont in fontDescriptor.get(CoreText.NSFontCascadeListAttribute, [])]
+                fontNames = ", ".join([fontName] + fontFallbacks)
 
                 spanData = dict(defaultData)
                 fill = self._colorClass(fillColor).svgColor()
@@ -435,7 +454,7 @@ class SVGContext(BaseContext):
                     if a != 1:
                         spanData["stroke-opacity"] = a
                     spanData["stroke-width"] = formatNumber(abs(strokeWidth) * .5)
-                spanData["font-family"] = fontName
+                spanData["font-family"] = fontNames
                 spanData["font-size"] = formatNumber(fontSize)
 
                 if openTypeFeatures:
@@ -474,6 +493,9 @@ class SVGContext(BaseContext):
 
         self._svgContext.endtag("text")
         self._svgContext.newline()
+        if isinstance(rawTxt, FormattedString) and rawTxt.svgLink:
+            self._svgContext.endtag("a")
+            self._svgContext.newline()
         self._svgEndClipPath()
 
     def _image(self, path, xy, alpha, pageNumber):
@@ -620,7 +642,7 @@ class SVGContext(BaseContext):
         return None
 
     def _svgStyleOpenTypeFeatures(self, featureTags):
-        return ", ".join(["'%s'" % tag for tag in featureTags])
+        return ", ".join(["'%s' %s" % (tag, int(value)) for tag, value in featureTags.items()])
 
     def _svgStyle(self, **kwargs):
         style = []
